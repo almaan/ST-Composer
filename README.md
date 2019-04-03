@@ -18,8 +18,21 @@ The process for genereating the synthetic ST-data is in short
 
 1. Generate spot-coordinates and regions based on provided image
 2. Specify the number of celltypes present within the dataset
-3. make  n\_region draws from Dir(alpha) where alpha is a vector of length K (celltypes) with the same value, default 0.5, of all entries; these are the priors for each region. Denote the
+3. For each celltype draw G samples from Gamma(3,0.2) to obtain rates for each gene, providing a "rate-vectors".
+4. For each gene draw one sample from Unif(0,1) to represent the probability vector, shared amongst all genes 
+5. make  n\_region draws from Dir(alpha) where alpha is a vector of length K (celltypes) with the same value, default 0.5, of all entries; these are the priors for each region. Denote the
    K-dimensional vector for region r as p\_r
-4. For each spot s within region r draw $n_{sr}$ from Unif(1,upper\_limit) representing the number of cells. 
-5. For each spot sample $z$ from Mult($n_{sr},p_r)$ 
+6. For each spot s within region r draw n\_sr} from Unif(1,upper\_limit) representing the total number of cells at the given spot. 
+7. For each spot sample z from Mult(n\_sr,p\_r) representing the number of cells from each celltype  
+8. For every cell c within each spot s sample from NB(r\_l,p | l = z\_c ), i.e. use the celltype specific rates, and add to the spot
+
+This will generate regions where the same celltypes are present but at different proportions (which are known to the user)
+
+A single cell data-set will also be generated which is balanced between the K different celltypes and uses the same rate-vectors, but scaled 10x compared to the ST-data (accounting for the fact that
+only a small proportion of cells at each spot are registered. By default 2500 single cells are contained within the set; to avoid generating this single cell dataset specify --n\_single\_cells as zero
+or any smaller number.
+
+Examples
+
+
 
