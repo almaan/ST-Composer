@@ -105,11 +105,11 @@ def generate_st_array(rawimg,
 
 def make_fake_data(sptidx,
                    arrcrd,
-                   alpha = 0.5,
-                   n_sc = 2500,
-                   n_celltypes = 5,
-                   n_genes = 500,
-                   upper_cell_limit = 30):
+                   alpha,
+                   n_sc ,
+                   n_celltypes,
+                   n_genes,
+                   upper_cell_limit):
     
     out = {}
     
@@ -178,7 +178,7 @@ def make_fake_data(sptidx,
         
         for z in range(n_celltypes):
             # use 10x higher rates for sigle cells
-            z_total_counts = 2*t.tensor(rates[:,k].astype(np.float32).reshape(-1,1)) 
+            z_total_counts = 2*t.tensor(rates[:,z].astype(np.float32).reshape(-1,1)) 
             # sample cells from celltype z
             sc_mat.append(nb(total_count= z_total_counts, 
                                              probs = probs).sample(t.tensor([sc_mem[z]])).numpy())
@@ -258,6 +258,7 @@ if __name__ == '__main__':
     
     parser.add_argument('-g','--n_genes',
                         required = False,
+                        type = int,
                         default = 500,
                         help = ('number of genes to',
                                 ' use in the synthetic',
@@ -267,6 +268,7 @@ if __name__ == '__main__':
     
     parser.add_argument('-s','--n_single_cells',
                         required = False,
+                        type = int,
                         default = 2500,
                         help = ('number of single',
                                 ' cells to use in'
@@ -278,6 +280,7 @@ if __name__ == '__main__':
     
     parser.add_argument('-z','--n_celltypes',
                         required = False,
+                        type = int,
                         default = 5,
                         help = ('number of celltypes',
                                 ' to use within tissue',
@@ -287,6 +290,7 @@ if __name__ == '__main__':
     
     parser.add_argument('-r','--regions',
                         required = False,
+                        type = int,
                         default = 3,
                         help = ('number of regions within',
                                 ' provided image. Do not count'
@@ -295,6 +299,7 @@ if __name__ == '__main__':
     
     parser.add_argument('-u','--upper_cell_limit',
                         required = False,
+                        type = int,
                         default = 30,
                         help = ('maximum number of',
                                 ' cells allowed to be',
