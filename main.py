@@ -246,7 +246,7 @@ def make_fake_data(sptidx,
 
         # make DataFrame for SC-meta data
         idx_ct = np.vstack([np.repeat([k],n).reshape(-1,1) for (k,n) in enumerate(sc_mem)]).reshape(-1,1)[ridx]
-        bio_ct = np.array(['_'.join(['Celltype',str(k)]) for k in idx_ct]).reshape(-1,1)[ridx]
+        bio_ct = np.array(['_'.join(['Celltype',str(k)]) for k in idx_ct]).reshape(-1,1)
         df_meta = pd.DataFrame(np.hstack((idx_ct,bio_ct)),
                                index = index_sc,
                                columns = ['celltype','bio_celltype'] )
