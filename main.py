@@ -35,9 +35,9 @@ from sklearn.decomposition import PCA
 
 import pandas as pd
 import os.path as osp
+import sys
 import os
 import re
-
 
 
 plt.style.use('dark_background')
@@ -109,17 +109,64 @@ def make_fake_data(sptidx,
                    n_sc ,
                    n_celltypes,
                    n_genes,
-                   upper_cell_limit):
+                   upper_cell_limit,
+                   **kwargs):
     
     out = {}
+    eps = 1e-8
     
     # generate parameter values for genes and celltyps
     n_spots = sptidx.shape[0]
-    probs = np.random.uniform(0,1,(n_genes,1)) # probability in nb-distribution
-    logits = np.log(probs / (1.0-probs)) # logodds in nb-distribution
-    # TODO: Think about this
-    rates = np.random.gamma(3,0.2, size = (n_genes,n_celltypes)) # rates in nb-distribution
     
+    if 'sc_parameters' in kwargs:
+        rates, logits = kwargs['sc_parameters']
+        if isinstance(rates, pd.DataFrame):
+            rates = rates.values
+        if isinstance(logits,pd.DataFrame):
+            logits =  logits.values
+        
+        logits = logits.reshape(-1,1)
+        probs = np.exp(logits) / (1.0 + np.exp(logits))
+        assert all(0.0 - eps < probs) & all(probs < 1.0 + eps), 'Success Probability not in supported domain'
+        
+        sc_celltypes = rates.shape[1]
+        sc_ngenes = rates.shape[0]
+        
+        # Check celltype specifications
+        if (n_celltypes >=sc_celltypes) or (n_celltypes < 0):
+            if n_celltypes > 0:
+                print(f'Provided parameters only support {sc_celltypes} celltypes',
+                      f'Thus using this rather than the provided {n_celltypes}')
+            else:
+                print(f'Using Complete Celltype set in SC data')
+            n_celltypes = sc_celltypes
+        else:
+            print(f'Using {n_celltypes} celltypes as specified by user')
+            rates = rates[:,0:n_celltypes]
+        
+        # Check gene specifications
+        if (n_genes >= sc_ngenes) or (n_genes < 0):
+            if n_genes > 0:
+                print(f'Provided parameters only support {sc_ngenes} genes',
+                      f'Thus using this rather than the provided {n_genes}')
+            else:
+                print('Using Complete Gene set in SC data')
+            n_genes = sc_ngenes
+        else:
+            print(f'Using {n_genes} genes as specified by user')
+    
+        rates = rates[0:n_genes,:]
+        logits = logits[0:n_genes,:]
+        probs = probs[0:n_genes,:]
+
+    # generate parameter values from pre-defined distributions      
+    else:
+        probs = np.random.uniform(0,1,(n_genes,1)) # probability in nb-distribution
+        logits = np.log(probs / (1.0-probs)) # logodds in nb-distribution
+        rates = np.random.gamma(shape = 0.78,
+                                rate = 1.82,
+                                size = (n_genes,n_celltypes)) # rates in nb-distribution
+        
     # region labels and cardinality 
     idx, n_members = np.unique(sptidx, return_counts = True) 
     
@@ -127,9 +174,10 @@ def make_fake_data(sptidx,
     props = np.zeros((n_spots,n_celltypes))
     cmat =  np.zeros((n_spots,n_genes))
 
-    sigma = 0.1 # scaling factor
+    sigma = np.random.uniform(0,1, size = n_spots) # scaling factor
     probs = t.tensor((probs.astype(np.float32)))
-
+    
+    print('>> Generating ST-data')
     # generate st-data
     for k,(lab,mem) in enumerate(zip(idx,n_members)):
         # get spots within morphological region
@@ -142,21 +190,18 @@ def make_fake_data(sptidx,
         # number of cells from each celltype in all spots of region 
         celltypes  = np.vstack([np.random.multinomial(n = n_cells[x], pvals = pvals).reshape(1,-1) \
                                            for x in range(mem)])
-        
         # true proportions of celltypes within spots of region
         props[inset,:] = celltypes / celltypes.sum(axis=1).reshape(-1,1)    
-        
         # iterate over each celltype
         for z in range(n_celltypes):
-            # use rate for specific cell type
-            s_total_count = t.tensor((sigma * rates[:,z]).astype(np.float32).reshape(-1,1))
             # iterate over each spot in the region 
             for spt, j in enumerate(celltypes[:,z]):
+                    s_total_count = t.tensor((sigma[spt] * rates[:,z]).astype(np.float32).reshape(-1,1))
                     # generate counts from j cells from cellype z to spot spt 
                     samples = nb(total_count = s_total_count, probs = probs).sample(t.tensor([j]))
                     # add counts to total count matrix
                     cmat[inset[spt],:] += samples.sum(dim = 0).numpy().reshape(-1,)
-     
+
     # make DataFrame for ST-count matrix
     index = pd.Index(list(map( lambda x: ''.join(['X',str(x[0]),'x',str(x[1])]), arrcrd)))
     colnames_cmat = [''.join(['Gene_',str(x)]) for x in range(n_genes)]
@@ -168,17 +213,18 @@ def make_fake_data(sptidx,
     
     # add DataFrames to output
     out.update({'st_cnt':df_cmat,
-                'st_prop':df_proportions})
+                'W':df_proportions})
     
     # if number of single cell observations should be generated
     if n_sc > 0:
+        print('>> Generating Single Cell Data')
         # get number of cells from each celltype. Use uniform probability
         sc_mem = np.random.multinomial(n_sc, np.ones(n_celltypes) / n_celltypes )
         sc_mat = []
         
         for z in range(n_celltypes):
             # use 10x higher rates for sigle cells
-            z_total_counts = 2*t.tensor(rates[:,z].astype(np.float32).reshape(-1,1)) 
+            z_total_counts = t.tensor(rates[:,z].astype(np.float32).reshape(-1,1)) 
             # sample cells from celltype z
             sc_mat.append(nb(total_count= z_total_counts, 
                                              probs = probs).sample(t.tensor([sc_mem[z]])).numpy())
@@ -206,7 +252,7 @@ def make_fake_data(sptidx,
                                columns = ['celltype','bio_celltype'] )
         
         # make DataFrame distribution Parameters
-        df_rates = pd.DataFrame(data = rates*2.0, 
+        df_rates = pd.DataFrame(data = rates, 
                                 index = colnames_cmat,
                                 columns = colnames_proportions)
         
@@ -246,7 +292,7 @@ if __name__ == '__main__':
                                 ' is performed.'
                                 ))
     
-    parser.add_argument('-o','--odir',
+    parser.add_argument('-o','--outdir',
                         required = False,
                         default = '',
                         help = ('output directory',
@@ -335,7 +381,16 @@ if __name__ == '__main__':
                                 ' background color',
                                 ' default is #808080',
                                 ))
-
+    
+    parser.add_argument('-p','--sc_parameters',
+                         required = False,
+                         default = [None, None],
+                         nargs = 2,
+                         help = ('Provide single cell',
+                                 ' rate and logits',
+                                 ' from other source'
+                                 ))
+    
     args = parser.parse_args()
 
 # Generate Data ---------------------------    
@@ -350,7 +405,7 @@ if __name__ == '__main__':
         tag = re.sub('|\.|:','',str(datetime.datetime.today())).replace(' ','-')
     
     # set output directory
-    if not args.odir:
+    if not args.outdir:
         odir = osp.join(osp.dirname(args.image),'.'.join(['fake_tissue',tag]))
     else:
         odir = args.outdir
@@ -376,10 +431,12 @@ if __name__ == '__main__':
                 pixel_y = pxcrd[:,1],
                 region = sptidx)
     
-    df_spot = pd.DataFrame(spot_data, columns = spot_data.keys())
+    df_spot = pd.DataFrame(spot_data,
+                           columns = spot_data.keys())
     
     # generate fake data
-    data = make_fake_data(sptidx = sptidx,
+    
+    make_fake_args = dict(sptidx = sptidx,
                           arrcrd = arrcrd,
                           alpha = args.alpha,
                           n_celltypes=args.n_celltypes,
@@ -387,6 +444,37 @@ if __name__ == '__main__':
                           n_sc = args.n_single_cells,
                           upper_cell_limit = args.upper_cell_limit)
     
+    if all(args.sc_parameters):
+        
+        sc_rates = pd.read_csv(args.sc_parameters[0],
+                       header = 0,
+                       index_col = 0,
+                       sep = "\t")
+        
+        sc_logits = pd.read_csv(args.sc_parameters[1],
+                       header = 0,
+                       index_col = 0,
+                       sep = "\t")
+
+        make_fake_args.update({'sc_parameters':[sc_rates, sc_logits]})
+        print(f'Using provided single cell parameters')
+    
+    elif any(args.sc_parameters):
+        print(f'Missing either rate or logits data for the single cell')
+        print(f'Exiting')
+        sys.exit(0)
+    
+    data = make_fake_data(**make_fake_args)
+    
+    save_file = lambda file,df : df.to_csv(file,
+                                           sep = '\t',
+                                           index = True,
+                                           header = True)
+    
+    for (filetag,dataframe) in data.items():
+        oname = osp.join(odir, '.'.join([filetag,tag,'tsv']))
+        save_file(oname,dataframe)
+        
     
 # Visualize ----------------------------
     
